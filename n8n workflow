@@ -1,0 +1,581 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "00fb701f-7676-4870-b2e8-a9112b1890ae",
+      "name": "Wait for Image Generation",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -2032,
+        928
+      ],
+      "webhookId": "wait-image-webhook-id"
+    },
+    {
+      "parameters": {
+        "amount": 45
+      },
+      "id": "b5e72db2-2d03-4af4-9a9c-fa037b5ef6e2",
+      "name": "Wait for Video Generation",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1648,
+        928
+      ],
+      "webhookId": "wait-video-webhook-id"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://file.io",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "b9ff48fe-0d1a-48d6-8059-b669bd85fba9",
+      "name": "Upload Video to Storage1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -1744,
+        1280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "groqApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"model\": \"llama-3.3-70b-versatile\", \"messages\": [{ \"role\": \"user\", \"content\": \"Break down this video description into \" + String($json[\"Duration (seconds)\"]) + \" distinct visual scenes. Return ONLY a JSON object with a 'scenes' array containing \" + String($json[\"Duration (seconds)\"]) + \" scene descriptions. Each scene should be a detailed visual prompt suitable for image generation.\\n\\nVideo description: \" + String($json[\"Video Description\"]) }], \"temperature\": 0.7, \"response_format\": { \"type\": \"json_object\" } } }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "51782d43-8fcc-4a26-98ab-47e42e1118a8",
+      "name": "Generate Scenes with Groq1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -3120,
+        1152
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "Jw5buUYj4DQ7CjKq",
+          "name": "groqapikey"
+        },
+        "groqApi": {
+          "id": "R8h8If5D1z6vWRuG",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\nconst raw = $input.first().json;\nlet text = '';\n\n// Extract text from Groq response\nif (raw.choices && raw.choices[0] && raw.choices[0].message && raw.choices[0].message.content) {\n  text = raw.choices[0].message.content;\n} else if (raw.output) {\n  text = raw.output;\n} else if (raw.output_text) {\n  text = raw.output_text;\n} else {\n  text = JSON.stringify(raw);\n}\n\n// Parse JSON\ntry {\n  const cleanText = text.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  const parsed = JSON.parse(cleanText);\n  if (Array.isArray(parsed.scenes)) {\n    parsed.scenes.forEach((scene, idx) => {\n      out.push({ \n        json: { \n          scene: typeof scene === 'string' ? scene : (scene.description || JSON.stringify(scene)), \n          index: idx,\n          image_model: $input.first().json['Image Model'] || 'FLUX.1 Schnell',\n          videoDescription: $input.first().json['Video Description'],\n          duration: $input.first().json['Duration (seconds)']\n        } \n      });\n    });\n    return out;\n  }\n} catch (e) {\n  // Fallback: split by lines\n  const lines = text.split(/\\n+/).map(l => l.trim()).filter(Boolean);\n  const duration = $input.first().json['Duration (seconds)'] || lines.length;\n  for (let i = 0; i < Math.min(duration, lines.length); i++) {\n    out.push({ \n      json: { \n        scene: lines[i], \n        index: i,\n        image_model: $input.first().json['Image Model'] || 'FLUX.1 Schnell',\n        videoDescription: $input.first().json['Video Description'],\n        duration: $input.first().json['Duration (seconds)']\n      } \n    });\n  }\n}\n\nif (out.length === 0) {\n  throw new Error('Could not parse scenes from Groq response.');\n}\n\nreturn out;"
+      },
+      "id": "82809191-2f70-4dbe-9c50-6a464d393bce",
+      "name": "Extract Scenes1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2896,
+        1152
+      ]
+    },
+    {
+      "parameters": {
+        "formTitle": "AI Video Generator",
+        "formDescription": "Generate a video from your text description",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Video Description",
+              "fieldType": "textarea",
+              "placeholder": "Describe the video you want to create...",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Duration (seconds)",
+              "fieldType": "number",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Image Model",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "FLUX.1 Schnell"
+                  },
+                  {
+                    "option": "Stable Diffusion XL"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Generate Video",
+          "respondWithOptions": {
+            "values": {
+              "formSubmittedText": "Your video is being generated! This may take a few minutes."
+            }
+          }
+        }
+      },
+      "id": "13b326f5-ae40-45b9-8ab6-0631af92fa4e",
+      "name": "Video Request Form1",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.3,
+      "position": [
+        -3568,
+        1152
+      ],
+      "webhookId": "5567388d-b6b1-4533-8bf7-c67001255f28"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect all uploaded video URLs\nconst urls = [];\n\nfor (const item of $input.all()) {\n  if (item.json.output && Array.isArray(item.json.output) && item.json.output.length > 0) {\n    urls.push({\n      index: item.json.index || 0,\n      url: item.json.output[0]\n    });\n  } else if (item.json.link) {\n    urls.push({\n      index: item.json.index || 0,\n      url: item.json.link\n    });\n  }\n}\n\n// Sort by index\nurls.sort((a, b) => a.index - b.index);\n\nif (urls.length === 0) {\n  throw new Error('No video URLs found to concatenate');\n}\n\nreturn [{\n  json: {\n    videoInputs: urls.map(u => u.url),\n    totalVideos: urls.length\n  }\n}];"
+      },
+      "id": "7067a903-64ab-4b72-bac5-d9eb5edc36c4",
+      "name": "Collect Video URLs1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1136,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "1d4cae21-5e60-431d-ae7e-8a40e30da44e",
+      "name": "Split In Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -2416,
+        1152
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.replicate.com/v1/predictions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"version\": \"03c0802dc63ff01bb16f967f9ce4d7a784cbb697e9e7a593dd5f08bb83807ced\",\n  \"input\": {\n    \"videos\": {{ JSON.stringify($json.videoInputs) }}\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "5ed64aa3-93e0-48f2-8b0f-3225943e72c0",
+      "name": "Concat Videos (Replicate)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -1360,
+        1168
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "TGQZz3N4k3dLjLTl",
+          "name": "mergevideos"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "unit": "minutes"
+      },
+      "id": "dce824eb-4987-4687-a173-2a0a026d1686",
+      "name": "Wait for Processing",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -912,
+        1152
+      ],
+      "webhookId": "3d88fbd8-960a-421f-b0ed-c3e71b535218"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.urls.get }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "d30f103e-b387-431c-b399-8a78accfe1d0",
+      "name": "Check Replicate Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -656,
+        1152
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "VdXFpBmvn4vGSydO",
+          "name": "REPLICATE_API_KEY"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equals",
+              "value2": "succeeded"
+            }
+          ]
+        }
+      },
+      "id": "02cd5ecd-0820-41da-9256-4c84560276d4",
+      "name": "Is Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -416,
+        1152
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "success",
+              "value": "true"
+            },
+            {
+              "name": "video_url",
+              "value": "={{ $json.output }}"
+            },
+            {
+              "name": "message",
+              "value": "✅ Video generated successfully! Your video is ready."
+            },
+            {
+              "name": "total_scenes",
+              "value": "={{ $json.totalVideos || 'N/A' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "28672f05-0e88-4f30-8bea-85ac3543e2f9",
+      "name": "Format Final Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        1056
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "83bee606-0c70-4790-9be0-17214fe43738",
+      "name": "Wait and Retry",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -160,
+        1248
+      ],
+      "webhookId": "bfe7f754-9794-4564-9a12-2a4abd08092d"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.replicate.com/v1/models/kwaivgi/kling-v2.5-turbo-pro/predictions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"input\": {\n    \"image\": {{ JSON.stringify($json.output && $json.output[0] ? $json.output[0] : '') }},\n    \"prompt\": {{ JSON.stringify($json.scene) }},\n    \"num_frames\": 24,\n    \"fps\": 24\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "9104f858-f385-4c94-bcce-d4acd118616e",
+      "name": "Convert Image to Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -1840,
+        928
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "wIUG4CKlO8jH1Uis",
+          "name": "kwaivgi image to video"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.replicate.com/v1/models/google/nano-banana/predictions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"input\": {\n    \"prompt\": {{ JSON.stringify($json.scene) }}\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "bd5c5b6a-27d1-4776-9055-fc4df20f6ab1",
+      "name": "Generate Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -2224,
+        928
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "Uk7SnNY3zWlTzLJh",
+          "name": "nanobanana"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Wait for Image Generation": {
+      "main": [
+        [
+          {
+            "node": "Convert Image to Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Video Generation": {
+      "main": [
+        [
+          {
+            "node": "Upload Video to Storage1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Video to Storage1": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Scenes with Groq1": {
+      "main": [
+        [
+          {
+            "node": "Extract Scenes1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Scenes1": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Video Request Form1": {
+      "main": [
+        [
+          {
+            "node": "Generate Scenes with Groq1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Video URLs1": {
+      "main": [
+        [
+          {
+            "node": "Concat Videos (Replicate)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split In Batches": {
+      "main": [
+        [
+          {
+            "node": "Collect Video URLs1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Concat Videos (Replicate)": {
+      "main": [
+        [
+          {
+            "node": "Wait for Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Processing": {
+      "main": [
+        [
+          {
+            "node": "Check Replicate Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Replicate Status": {
+      "main": [
+        [
+          {
+            "node": "Is Complete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Complete?": {
+      "main": [
+        [
+          {
+            "node": "Format Final Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait and Retry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait and Retry": {
+      "main": [
+        [
+          {
+            "node": "Check Replicate Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert Image to Video": {
+      "main": [
+        [
+          {
+            "node": "Wait for Video Generation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Image": {
+      "main": [
+        [
+          {
+            "node": "Wait for Image Generation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "51e36628561fdbb8609e528cc965baa5bd09f7e259e9672d4c04284845a07791"
+  }
+}
